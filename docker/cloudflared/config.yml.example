@@ -1,0 +1,22 @@
+tunnel: YOUR_TUNNEL_ID
+credentials-file: /root/.cloudflared/YOUR_TUNNEL_ID.json
+
+# 或者使用 Tunnel Token (推荐)
+# 直接在 docker-compose.yml 中设置 TUNNEL_TOKEN 环境变量
+
+ingress:
+  # F5-TTS 服务路由
+  - hostname: f5-tts.yourdomain.com
+    service: http://nginx-auth:80
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 30s
+      httpHostHeader: f5-tts.yourdomain.com
+
+  # 健康检查
+  - hostname: f5-tts.yourdomain.com
+    path: /health
+    service: http://nginx-auth:80
+
+  # 默认规则 (必须)
+  - service: http_status:404

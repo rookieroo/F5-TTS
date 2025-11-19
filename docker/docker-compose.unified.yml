@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  # 统一 TTS 服务 (F5-TTS + IndexTTS2)
+  unified-tts:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.unified
+    container_name: unified-tts-service
+    # runtime: nvidia  # Mac M4 不支持 NVIDIA
+    environment:
+      # Mac M4 CPU 模式
+      - USE_CPU=${USE_CPU:-true}
+      - USE_FP16=${USE_FP16:-true}
+      # 管理员认证
+      - ENABLE_AUTH=${ENABLE_AUTH:-true}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
+      # Hugging Face 镜像（可选）
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
+      # Mac M4 优化
+      - OMP_NUM_THREADS=8
+      - MKL_NUM_THREADS=8
+    volumes:
+      - unified-tts-cache:/root/.cache/huggingface/hub
+      - unified-tts-models:/workspace/models
+      - ../outputs:/workspace/outputs
+      - ../data:/workspace/data
+      - ${MODEL_CACHE_PATH:-/tmp/models}:/workspace/external_models
+    ports:
+      - "${F5TTS_PORT:-7861}:7860"
+    restart: unless-stopped
+    command: >
+      python3 /workspace/unified_tts_service.py
+      --port 7860
+      --host 0.0.0.0
+      --cpu
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860"]
+      interval: 45s
+      timeout: 15s
+      retries: 5
+      start_period: 300s  # Mac CPU 模型加载需要更长时间
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+          memory: 16G
+        reservations:
+          memory: 8G
+      # devices:  # Mac M4 不需要 GPU 设备
+
+  # Nginx 反向代理 + 认证
+  nginx-auth:
+    image: nginx:alpine
+    container_name: unified-tts-nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/.htpasswd:/etc/nginx/.htpasswd:ro
+    ports:
+      - "${NGINX_PORT:-8080}:80"
+    depends_on:
+      unified-tts:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Cloudflare Tunnel (本地测试暂时禁用)
+  # cloudflared:
+  #   image: cloudflare/cloudflared:latest
+  #   container_name: unified-tts-tunnel
+  #   command: tunnel --no-autoupdate run
+  #   environment:
+  #     - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+  #   volumes:
+  #     - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+  #   depends_on:
+  #     - nginx-auth
+  #   restart: unless-stopped
+  #   profiles:
+  #     - production  # 仅在生产环境启用
+
+volumes:
+  unified-tts-cache:
+    driver: local
+  unified-tts-models:
+    driver: local
+
+networks:
+  default:
+    name: unified-tts-network
